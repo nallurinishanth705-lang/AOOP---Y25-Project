@@ -1,0 +1,155 @@
+=== Starting state ===
+   ACC-1001 | status ACTIVE | balance Rs. 10,000.00 | ledger consistent: true
+   ACC-2002 | status ACTIVE | balance Rs. 3,000.00 | ledger consistent: true
+
+=== Test 1: invalid amounts ===
+
+>> Deposit Rs. 0
+   REJECTED: Amount must be greater than zero
+
+>> Deposit Rs. -500
+   REJECTED: Amount must be greater than zero
+
+>> Withdraw Rs. -100
+   REJECTED: Amount must be greater than zero
+
+=== Test 2: deposit and withdraw ===
+
+>> Deposit Rs. 2,500
+   OK: allowed
+
+>> Withdraw Rs. 1,500
+   OK: allowed
+   ACC-1001 | status ACTIVE | balance Rs. 11,000.00 | ledger consistent: true
+
+=== Test 3: overdraft limit (A has limit Rs. 2,000) ===
+
+>> Withdraw Rs. 12,000 (balance goes to -Rs. 1,000, inside the limit)
+   OK: allowed
+   ACC-1001 | status ACTIVE | balance -Rs. 1,000.00 | ledger consistent: true
+
+>> Withdraw Rs. 2,000 (would go to -Rs. 3,000, beyond the limit)
+   REJECTED: Overdraft limit exceeded on ACC-1001 (balance -Rs. 1,000.00, limit Rs. 2,000.00, asked Rs. 2,000.00)
+
+>> Deposit Rs. 1,000 to bring balance back to zero
+   OK: allowed
+
+>> Deposit Rs. 10,000 to make A healthy again
+   OK: allowed
+
+=== Test 4: frozen and closed accounts ===
+
+>> Freeze A
+   OK: allowed
+
+>> Withdraw Rs. 100 from frozen A
+   REJECTED: Account ACC-1001 is FROZEN, withdrawals are not allowed
+
+>> Freeze A again
+   REJECTED: Only an ACTIVE account can be frozen (status: FROZEN)
+
+>> Unfreeze A
+   OK: allowed
+
+>> Withdraw Rs. 100 after unfreeze
+   OK: allowed
+
+>> Close A while balance is not zero
+   REJECTED: Balance must be zero before closing (balance: Rs. 9,900.00)
+
+>> Close empty account C
+   OK: allowed
+
+>> Deposit into closed C
+   REJECTED: Account ACC-3003 is closed
+
+>> Unfreeze closed C
+   REJECTED: Only a FROZEN account can be unfrozen (status: CLOSED)
+
+=== Test 5: normal transfer of Rs. 5,000 from A to B ===
+   Before:
+   ACC-1001 | status ACTIVE | balance Rs. 9,900.00 | ledger consistent: true
+   ACC-2002 | status ACTIVE | balance Rs. 3,000.00 | ledger consistent: true
+
+>> Transfer TRF-001
+   OK: allowed
+   Transfer status: COMPLETED
+   After:
+   ACC-1001 | status ACTIVE | balance Rs. 4,900.00 | ledger consistent: true
+   ACC-2002 | status ACTIVE | balance Rs. 8,000.00 | ledger consistent: true
+
+>> Run TRF-001 a second time
+   REJECTED: Transfer TRF-001 was already processed (COMPLETED)
+
+=== Test 6: transfer rules ===
+
+>> Transfer from A to A
+   REJECTED: Source and destination must be different accounts
+
+>> Transfer Rs. 0
+   REJECTED: Amount must be greater than zero
+
+>> Transfer more than overdraft allows
+   REJECTED: Overdraft limit exceeded on ACC-1001 (balance Rs. 4,900.00, limit Rs. 2,000.00, asked Rs. 500,000.00)
+
+>> Withdraw from frozen B via transfer
+   REJECTED: Account ACC-2002 is FROZEN, withdrawals are not allowed
+   Nothing should have moved:
+   ACC-1001 | status ACTIVE | balance Rs. 4,900.00 | ledger consistent: true
+   ACC-2002 | status ACTIVE | balance Rs. 8,000.00 | ledger consistent: true
+
+=== Test 7: crash in the middle of a transfer (Rs. 5,000 from A to B) ===
+   Before:
+   ACC-1001 | status ACTIVE | balance Rs. 4,900.00 | ledger consistent: true
+   ACC-2002 | status ACTIVE | balance Rs. 8,000.00 | ledger consistent: true
+
+>> Transfer TRF-006 with crash after debit
+   REJECTED: Transfer TRF-006 failed and was rolled back: simulated system crash
+   Transfer status: ROLLED_BACK
+   After (no money lost):
+   ACC-1001 | status ACTIVE | balance Rs. 4,900.00 | ledger consistent: true
+   ACC-2002 | status ACTIVE | balance Rs. 8,000.00 | ledger consistent: true
+
+=== Test 8: ledger is read-only ===
+
+>> Try to delete an entry from A's ledger
+   REJECTED: UnsupportedOperationException (list is read-only)
+
+>> Try to add an entry to A's ledger
+   REJECTED: UnsupportedOperationException (list is read-only)
+
+=== Test 9: exactly at the overdraft limit (balance Rs. 1,000, limit Rs. 500) ===
+
+>> Withdraw Rs. 1,500 (lands exactly on -Rs. 500)
+   OK: allowed
+
+>> Withdraw 1 more paisa (one step past the limit)
+   REJECTED: Overdraft limit exceeded on ACC-4004 (balance -Rs. 500.00, limit Rs. 500.00, asked Rs. 0.01)
+   ACC-4004 | status ACTIVE | balance -Rs. 500.00 | ledger consistent: true
+
+=== Test 10: many things at the same time ===
+   Two people withdraw Rs. 8,000 at the same moment from Rs. 10,000. Successful withdrawals: 1
+   ACC-5005 | status ACTIVE | balance Rs. 2,000.00 | ledger consistent: true
+   100 people deposit Rs. 10 at the same moment (expected Rs. 1,000.00):
+   ACC-6006 | status ACTIVE | balance Rs. 1,000.00 | ledger consistent: true
+
+=== Ledger of ACC-1001 ===
+   TXN-0001 | OPENING_DEPOSIT |  Rs. 10,000.00 | balance  Rs. 10,000.00 | Account opened
+   TXN-0003 | DEPOSIT         |   Rs. 2,500.00 | balance  Rs. 12,500.00 | Cash deposit
+   TXN-0004 | WITHDRAWAL      |  -Rs. 1,500.00 | balance  Rs. 11,000.00 | Cash withdrawal
+   TXN-0005 | WITHDRAWAL      | -Rs. 12,000.00 | balance  -Rs. 1,000.00 | Cash withdrawal
+   TXN-0006 | DEPOSIT         |   Rs. 1,000.00 | balance       Rs. 0.00 | Cash deposit
+   TXN-0007 | DEPOSIT         |  Rs. 10,000.00 | balance  Rs. 10,000.00 | Cash deposit
+   TXN-0008 | WITHDRAWAL      |    -Rs. 100.00 | balance   Rs. 9,900.00 | Cash withdrawal
+   TXN-0009 | TRANSFER_OUT    |  -Rs. 5,000.00 | balance   Rs. 4,900.00 | TRF-001
+   TXN-0011 | TRANSFER_OUT    |  -Rs. 5,000.00 | balance    -Rs. 100.00 | TRF-006
+   TXN-0012 | REVERSAL        |   Rs. 5,000.00 | balance   Rs. 4,900.00 | TRF-006 (rollback)
+
+=== Ledger of ACC-2002 ===
+   TXN-0002 | OPENING_DEPOSIT |   Rs. 3,000.00 | balance   Rs. 3,000.00 | Account opened
+   TXN-0010 | TRANSFER_IN     |   Rs. 5,000.00 | balance   Rs. 8,000.00 | TRF-001
+
+=== Final check ===
+   ACC-1001 | status ACTIVE | balance Rs. 4,900.00 | ledger consistent: true
+   ACC-2002 | status ACTIVE | balance Rs. 8,000.00 | ledger consistent: true
+   Total money in A + B: Rs. 12,900.00
